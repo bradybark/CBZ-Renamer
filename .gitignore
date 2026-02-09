@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Config (contains API keys)
+cbz_renamer_config.json
+
+# Crash logs
+crash_log.txt
+
+# IDE
+.vscode/
+.idea/
