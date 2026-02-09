@@ -21,10 +21,6 @@ A desktop tool for batch-renaming `.cbz` comic and manga files using online meta
 - **Subtitle Support** — Optionally include subtitles with configurable separators
 - **Dark UI** — Clean dark theme built with Tkinter
 
-## Screenshot
-
-> Launch the app to see the dark-themed interface with scan results table, status indicators, and settings dialog.
-
 ## Getting Started
 
 ### Requirements
@@ -62,21 +58,3 @@ Click the ⚙ gear icon to configure:
 | **Use Source Format** | Preserve exact API title formatting (default: on)              |
 | **Subtitles**         | Include/exclude, separator style (hyphen, colon, match source) |
 
-## Project Structure
-
-```
-cbz-renamer/
-├── cbz_file_renamer.py    # Main app — UI and scan logic
-├── config.py              # Theme colors, config load/save
-├── filename_parser.py     # Filename parsing and normalization
-├── api_sources.py         # Google Books & ComicVine API clients
-└── cbz_renamer_config.json  # Persisted user settings (auto-generated)
-```
-
-## ComicVine API Key
-
-To use ComicVine as your online source, you'll need a free API key:
-
-1. Create an account at [comicvine.gamespot.com](https://comicvine.gamespot.com)
-2. Get your key at [comicvine.gamespot.com/api](https://comicvine.gamespot.com/api/)
-3. Paste it into Settings → ComicVine API Key
