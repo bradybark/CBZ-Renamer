@@ -12,7 +12,7 @@ A desktop tool for batch-renaming `.cbz` comic and manga files using online meta
 
 - **Online Lookups** — Fetches correct series names and subtitles from Google Books or ComicVine
 - **Source Format Preservation** — Uses the exact title formatting returned by the API (e.g. `Berserk Volume 01.cbz`), with a toggle to switch to standardized formatting (`Berserk, Vol. 01.cbz`)
-- **Local Guess** — Parses filenames locally when no internet is available
+- **Local Guess** — Parses filenames locally when no mathch is found
 - **Conflict Detection** — Highlights when online and local names disagree
 - **Duplicate Detection** — Flags files that would rename to the same target
 - **Inline Editing** — Double-click any final name to manually adjust it
