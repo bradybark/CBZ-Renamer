@@ -1,32 +1,34 @@
-# CBZ Renamer // PRO
+<p align="center">
+  <img src="app_icon.ico" width="80" />
+</p>
 
-A professional bulk renaming tool for comic and manga files (`.cbz`) that fetches accurate metadata from **Google Books** and **ComicVine**. This tool helps organize your digital library by normalizing filenames and appending correct subtitles.
+<h1 align="center">CBZ Renamer <sup>PRO</sup></h1>
 
-![License](https://img.shields.io/badge/License-MIT-purple) ![Python](https://img.shields.io/badge/Python-3.13-blue)
+<p align="center">
+  <b>Bulk-rename your manga &amp; comics in seconds.</b><br/>
+  Matches files against <em>Google Books</em> &amp; <em>ComicVine</em> for accurate, clean filenames.
+</p>
 
-## Features
+<p align="center">
+  <img src="https://img.shields.io/badge/python-3.13-blue?style=flat-square" />
+  <img src="https://img.shields.io/badge/license-MIT-purple?style=flat-square" />
+  <img src="https://img.shields.io/badge/platform-windows-0078D6?style=flat-square" />
+</p>
 
-- **Smart Metadata** — Verifies series names and numbering against online databases.
-- **Subtitle Probing** — Automatically fetches volume subtitles (e.g., `Invincible, Vol. 01: Family Matters`).
-- **Secure Configuration** — API keys are encrypted and stored in a separate `.secrets` file.
-- **Conflict Detection** — Highlights discrepancies between filenames and online data.
-- **Pro UI** — sleek dark theme, inline editing, and collapsible settings.
+---
 
-## Usage
-
-1.  **Run** the application (`CBZ Renamer.exe` or `python cbz_file_renamer.py`).
-2.  **Configure** your API keys in Settings (`Google Books` is free; `ComicVine` requires a key).
-3.  **Open Folder** containing your `.cbz` files.
-4.  **Scan** to fetch metadata.
-5.  **Review** matches (Web vs Local). Double-click to edit, right-click to toggle source.
-6.  **Apply Rename** to finalize changes.
-
-## Installation
-
-No installation required for the executable.
-To run from source:
-```bash
-pip install -r requirements.txt  # (Only standard lib + Pillow/requests if needed)
-python cbz_file_renamer.py
 ```
-*(Note: This project uses only the Python Standard Library + Pillow/requests for icons/api)*
+ OPEN FOLDER  →  SCAN  →  REVIEW  →  APPLY RENAME
+```
+
+> **Portable.** No install — just run the `.exe`.  
+> **Secure.** API keys encrypted, stored in `%LOCALAPPDATA%`.  
+> **Smart.** Auto-detects volumes vs chapters, fetches subtitles, flags conflicts.
+
+---
+
+### Quick Start
+
+1. Run `CBZ Renamer.exe`
+2. Add API keys in ⚙ Settings *(Google Books is free, ComicVine requires a key)*
+3. Open a folder → Scan → Review → Apply

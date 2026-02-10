@@ -10,6 +10,15 @@ def normalize(s):
     return s
 
 
+def sanitize_filename(name):
+    """Remove characters that are illegal in Windows filenames."""
+    # Replace colon with ' -' for readability (e.g. "Title: Subtitle" -> "Title - Subtitle")
+    name = name.replace(': ', ' - ').replace(':', '-')
+    # Strip remaining illegal chars: * ? " < > |
+    name = re.sub(r'[*?"<>|]', '', name)
+    return name
+
+
 def parse_filename(filename):
     """Parse a CBZ filename into (series_guess, volume_number_str, type_str).
 

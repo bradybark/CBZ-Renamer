@@ -1,6 +1,7 @@
 import os
 import sys
 import json
+import base64
 
 # --- THEME COLORS ---
 BG_DARK = "#0e0e0e"
@@ -20,23 +21,14 @@ ERROR_RED = "#ef4444"
 BORDER_COLOR = "#2a2a2a"
 EDIT_BG = "#0c2d48"
 
-# --- Config path (next to script or exe) ---
-if getattr(sys, 'frozen', False):
-    # Running as compiled exe
-    BASE_DIR = os.path.dirname(sys.executable)
-else:
-    # Running as script
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# --- Config path (%LOCALAPPDATA%\CBZ Renamer\) ---
+APP_DATA_DIR = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "CBZ Renamer")
+os.makedirs(APP_DATA_DIR, exist_ok=True)
 
-import base64
-import json
-
-CONFIG_PATH = os.path.join(BASE_DIR, "cbz_renamer_config.json")
-SECRETS_PATH = os.path.join(BASE_DIR, "cbz_renamer.secrets")
-CACHE_PATH = os.path.join(BASE_DIR, "cbz_renamer_cache.json")
+CONFIG_PATH = os.path.join(APP_DATA_DIR, "settings.json")
+CACHE_PATH = os.path.join(APP_DATA_DIR, "cache.json")
 
 # Simple obfuscation key (avoids plain text in file)
-# VPN/Hardware safe (Portable)
 _KEY = b'CBZ_RENAMER_SECURE'
 
 def _encrypt(text):
@@ -45,7 +37,6 @@ def _encrypt(text):
     try:
         data = text.encode('utf-8')
         xor_data = bytearray()
-        # Use a cycle of the combined key
         key_len = len(_KEY)
         for i, b in enumerate(data):
             xor_data.append(b ^ _KEY[i % key_len])
@@ -56,7 +47,7 @@ def _encrypt(text):
 def _decrypt(text):
     """De-obfuscate text."""
     if not text: return ""
-    if not text.startswith("ENC:"): return text # Return legacy plain text as-is
+    if not text.startswith("ENC:"): return text
     try:
         raw = base64.b64decode(text[4:])
         data = bytearray()
@@ -77,36 +68,60 @@ def load_config():
         "comicvine_api_key": "",
         "google_books_api_key": "",
         "use_source_format": True,
-        "comicvine_vol_prefix": "#"
+        "comicvine_vol_prefix": "#",
+        "chapter_prefix": "Ch."
     }
     try:
-        # 1. Load main config
         if os.path.exists(CONFIG_PATH):
             with open(CONFIG_PATH, "r") as f:
                 saved = json.load(f)
-            
-            # Decrypt legacy keys if present in main config
-            if "comicvine_api_key" in saved:
-                saved["comicvine_api_key"] = _decrypt(saved["comicvine_api_key"])
-            if "google_books_api_key" in saved:
-                saved["google_books_api_key"] = _decrypt(saved["google_books_api_key"])
+
+            # Decrypt API keys
+            for key in ["comicvine_api_key", "google_books_api_key"]:
+                if key in saved:
+                    saved[key] = _decrypt(saved[key])
 
             defaults.update(saved)
-            
-        # 2. Load secrets (overrides main config if present)
-        if os.path.exists(SECRETS_PATH):
-            with open(SECRETS_PATH, "r") as f:
-                secrets = json.load(f)
-            
-            # Decrypt secrets
+
+        # --- Legacy migration: read old files next to exe if they exist ---
+        if getattr(sys, 'frozen', False):
+            exe_dir = os.path.dirname(sys.executable)
+        else:
+            exe_dir = os.path.dirname(os.path.abspath(__file__))
+
+        old_config = os.path.join(exe_dir, "cbz_renamer_config.json")
+        old_secrets = os.path.join(exe_dir, "cbz_renamer.secrets")
+        old_cache = os.path.join(exe_dir, "cbz_renamer_cache.json")
+
+        migrated = False
+        if os.path.exists(old_config):
+            with open(old_config, "r") as f:
+                old = json.load(f)
             for key in ["comicvine_api_key", "google_books_api_key"]:
-                if key in secrets:
-                    secrets[key] = _decrypt(secrets[key])
-            
-            defaults.update(secrets)
-            
-        # Legacy migration check handled in save_config
-            
+                if key in old:
+                    old[key] = _decrypt(old[key])
+            defaults.update(old)
+            os.remove(old_config)
+            migrated = True
+
+        if os.path.exists(old_secrets):
+            with open(old_secrets, "r") as f:
+                old_sec = json.load(f)
+            for key in ["comicvine_api_key", "google_books_api_key"]:
+                if key in old_sec:
+                    old_sec[key] = _decrypt(old_sec[key])
+            defaults.update(old_sec)
+            os.remove(old_secrets)
+            migrated = True
+
+        if os.path.exists(old_cache):
+            # Move cache file to new location
+            import shutil
+            shutil.move(old_cache, CACHE_PATH)
+
+        if migrated:
+            save_config(defaults)
+
     except Exception:
         pass
     return defaults
@@ -114,24 +129,15 @@ def load_config():
 
 def save_config(cfg):
     try:
-        # Separate keys from public config
-        secret_keys = ["comicvine_api_key", "google_books_api_key"]
-        
-        public_cfg = {k: v for k, v in cfg.items() if k not in secret_keys}
-        secrets_cfg = {}
-        
-        # Encrypt keys for secrets file
-        for k in secret_keys:
-            if k in cfg:
-                secrets_cfg[k] = _encrypt(cfg[k])
+        save_data = dict(cfg)
 
-        # Save public config
+        # Encrypt API keys before saving
+        for key in ["comicvine_api_key", "google_books_api_key"]:
+            if key in save_data and save_data[key]:
+                save_data[key] = _encrypt(save_data[key])
+
         with open(CONFIG_PATH, "w") as f:
-            json.dump(public_cfg, f, indent=2)
-            
-        # Save secrets
-        with open(SECRETS_PATH, "w") as f:
-            json.dump(secrets_cfg, f, indent=2)
-            
+            json.dump(save_data, f, indent=2)
+
     except Exception as e:
         print(f"Config save error: {e}")

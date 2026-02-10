@@ -18,7 +18,7 @@ try:
         TABLE_BG, TABLE_FG, CONFLICT_YELLOW, ERROR_RED, BORDER_COLOR, EDIT_BG,
         load_config, save_config
     )
-    from filename_parser import parse_filename, normalize
+    from filename_parser import parse_filename, normalize, sanitize_filename
     from api_sources import (
         fetch_google_books_name, fetch_comicvine_name,
         load_disk_cache, save_disk_cache, reset_google_books_quota
@@ -60,6 +60,12 @@ try:
             else:
                 self.content.pack_forget()
                 self._arrow.config(text="▶")
+            # Update scroll region if inside a scrollable canvas
+            try:
+                app = self.winfo_toplevel()
+                self.update_idletasks()
+            except Exception:
+                pass
 
     class ToolTip:
         """Create a tooltip for a given widget."""
@@ -71,7 +77,9 @@ try:
             widget.bind("<Leave>", self.leave)
 
         def enter(self, event=None):
-            x, y, _, _ = self.widget.bbox("insert")
+            if self.tip_window:
+                return
+            x, y, _, _ = self.widget.bbox("insert") if self.widget.bbox("insert") else (0, 0, 0, 0)
             x += self.widget.winfo_rootx() + 25
             y += self.widget.winfo_rooty() + 25
             self.tip_window = tw = tk.Toplevel(self.widget)
@@ -84,6 +92,7 @@ try:
                              font=("Segoe UI", 8), padx=4, pady=2)
             label.pack()
 
+        def leave(self, event=None):
             if self.tip_window:
                 self.tip_window.destroy()
                 self.tip_window = None
@@ -199,6 +208,7 @@ try:
             self.google_books_api_key = tk.StringVar(value=cfg.get("google_books_api_key", ""))
             self.setting_use_source_format = tk.BooleanVar(value=cfg["use_source_format"])
             self.setting_cv_prefix = tk.StringVar(value=cfg.get("comicvine_vol_prefix", "#"))
+            self.setting_chapter_prefix = tk.StringVar(value=cfg.get("chapter_prefix", "Ch."))
 
             # --- STYLES ---
             style = ttk.Style()
@@ -362,7 +372,8 @@ try:
                 "comicvine_api_key": self.comicvine_api_key.get(),
                 "google_books_api_key": self.google_books_api_key.get(),
                 "use_source_format": self.setting_use_source_format.get(),
-                "comicvine_vol_prefix": self.setting_cv_prefix.get()
+                "comicvine_vol_prefix": self.setting_cv_prefix.get(),
+                "chapter_prefix": self.setting_chapter_prefix.get()
             })
 
         # ─── Settings Dialog ─────────────────────────────────────────
@@ -372,7 +383,7 @@ try:
             dlg = tk.Toplevel(self.root)
             dlg.title("Settings")
             dlg.configure(bg=BG_DARK)
-            dlg.geometry("420x580")
+            dlg.geometry("420x700")
             dlg.resizable(True, True)
             dlg.minsize(360, 400)
             dlg.transient(self.root)
@@ -420,6 +431,9 @@ try:
                 canvas.itemconfig(body_window, width=event.width)
             body.bind("<Configure>", _on_body_configure)
             canvas.bind("<Configure>", _on_canvas_configure)
+
+            # Store canvas ref for CollapsibleSection scroll updates
+            self._settings_canvas = canvas
 
             # Mouse wheel scrolling
             def _on_mousewheel(event):
@@ -519,12 +533,7 @@ try:
             sec_web.pack(fill=tk.X, pady=(0, 4))
             wb = sec_web.content
 
-            # "Include subtitle" check
-            cb_sub = tk.Checkbutton(wb, text="Include subtitle from API (e.g. 'Vol 1' → 'Vol 1: Subtitle')",
-                          variable=self.setting_include_subtitle,
-                          bg=BG_PANEL, fg=FG_DIM, selectcolor=BG_PANEL, activebackground=BG_PANEL, activeforeground=FG_TEXT)
-            cb_sub.pack(anchor="w", pady=(2, 0))
-            ToolTip(cb_sub, "Warning: Increases API calls significantly.\nChecks every file individually instead of once per series.")
+            # (Include subtitle is in the Subtitle Options section below)
 
             # Source format toggle
             sf_cb = tk.Checkbutton(wb, text="Use exact formatting from source",
@@ -542,6 +551,16 @@ try:
                                     values=["#", "Vol.", "Volume", "v."],
                                     state="readonly", width=10)
             cv_combo.pack(side=tk.LEFT, padx=(8, 0))
+
+            # Chapter Prefix Dropdown
+            ch_frame = tk.Frame(wb, bg=BG_PANEL)
+            ch_frame.pack(fill=tk.X, anchor="w", padx=(24, 0), pady=(0, 6))
+            tk.Label(ch_frame, text="Chapter Prefix:", bg=BG_PANEL, fg=FG_DIM,
+                     font=("Segoe UI", 8)).pack(side=tk.LEFT)
+            ch_combo = ttk.Combobox(ch_frame, textvariable=self.setting_chapter_prefix,
+                                    values=["Ch.", "Chapter", "#"],
+                                    state="readonly", width=10)
+            ch_combo.pack(side=tk.LEFT, padx=(8, 0))
 
             # Dynamic example label
             sf_example = tk.Label(wb, text="", bg=BG_PANEL, fg=TABLE_FG,
@@ -566,32 +585,9 @@ try:
                 activeforeground=FG_TEXT, font=("Segoe UI", 9), highlightthickness=0, borderwidth=0)
             cb.pack(anchor="w", pady=(4, 8))
 
-            sep_frame = tk.Frame(wb, bg=BG_PANEL, padx=6)
-            sep_frame.pack(fill=tk.X, pady=(0, 4))
-            tk.Label(sep_frame, text="Separator:", bg=BG_PANEL, fg=FG_DIM,
-                     font=("Segoe UI", 8)).pack(side=tk.LEFT, padx=(0, 8))
-            for val, label in [("hyphen", " -  Hyphen"), ("colon", " :  Colon"), ("source", " Match source")]:
-                rb = tk.Radiobutton(sep_frame, text=label, variable=self.setting_sub_separator, value=val,
-                    bg=BG_PANEL, fg=TABLE_FG, selectcolor=BG_PANEL, activebackground=BG_PANEL,
-                    activeforeground=FG_TEXT, font=("Segoe UI", 8), highlightthickness=0,
-                    borderwidth=0, indicatoron=True)
-                rb.pack(side=tk.LEFT, padx=(0, 6))
-
-            sep_example = tk.Label(wb, text="", bg=BG_PANEL, fg=FG_DIM, font=("Consolas", 8))
-            sep_example.pack(anchor="w", padx=(6, 0), pady=(2, 0))
-
-            def _update_sep(*args):
-                s = self.setting_sub_separator.get()
-                sep = " - "
-                if s == "colon":
-                    sep = ": "
-                elif s == "source":
-                    sep = " - " # standard fallback for example
-                
-                sep_example.config(text=f"e.g. The Walking Dead, Vol. 01{sep}Days Gone Bye.cbz")
-            
-            self.setting_sub_separator.trace_add("write", _update_sep)
-            _update_sep()
+            # Force scroll region calculation after all sections are packed
+            body.update_idletasks()
+            canvas.configure(scrollregion=canvas.bbox("all"))
 
         def _close_settings_dialog(self, dlg, canvas):
             """Clean up and close the settings dialog."""
@@ -823,36 +819,36 @@ try:
                         except Exception as e:
                             print(f"Online lookup failed for '{series_guess}': {e}")
 
-                    prefix = "Vol." if type_str == "Volume" else "Chapter"
+                    # Determine prefix based on detected type
+                    if type_str == "Volume":
+                        prefix = "Vol."
+                    else:
+                        prefix = self.setting_chapter_prefix.get()
 
                     # Build online name
                     online_name = "\u2014"
                     if online_series:
-                        if use_source_fmt and online_raw_title:
+                        if use_source_fmt and online_raw_title and type_str == "Volume":
                             # Use the raw title from the API, just pad the number
+                            # Only for Volumes — chapters should use standardized format
+                            # since APIs always return volume-based titles
                             online_name = self._pad_volume_in_title(online_raw_title, vol_num)
                             # Handle subtitle stripping if subtitles are disabled
                             if not self.setting_include_subtitle.get():
                                 online_name = self._strip_subtitle_from_title(online_name)
                             online_name += ".cbz"
                         else:
-                            # Standardized format (old behavior), or ComicVine fallback
+                            # Standardized format
                             online_name = f"{online_series}, {prefix} {vol_num}"
                             if self.setting_include_subtitle.get() and online_subtitle:
-                                sep_choice = self.setting_sub_separator.get()
-                                if sep_choice == "colon":
-                                    sep = ": "
-                                elif sep_choice == "source":
-                                    sep = online_orig_sep or " - "
-                                else:
-                                    sep = " - "
-                                online_name += f"{sep}{online_subtitle}"
+                                online_name += f" - {online_subtitle}"
                             online_name += ".cbz"
+                        online_name = sanitize_filename(online_name)
 
                     # Build local backup name
                     backup_name = "\u2014"
                     if scan_mode in ("both", "local"):
-                        backup_name = f"{series_guess}, {prefix} {vol_num}.cbz"
+                        backup_name = sanitize_filename(f"{series_guess}, {prefix} {vol_num}.cbz")
 
                     # Determine final name and status
                     if scan_mode == "online":
@@ -1057,7 +1053,8 @@ try:
                     continue
                 try:
                     old = os.path.join(self.selected_directory, data['original'])
-                    new = os.path.join(self.selected_directory, data['final'])
+                    safe_final = sanitize_filename(data['final'])
+                    new = os.path.join(self.selected_directory, safe_final)
                     if os.path.exists(new) and old != new:
                         errors.append((data['original'], "Target already exists"))
                         continue
