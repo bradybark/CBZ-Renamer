@@ -2,7 +2,7 @@
   <img src="app_icon.ico" width="80" />
 </p>
 
-<h1 align="center">CBZ Renamer <sup>PRO</sup></h1>
+<h1 align="center">CBZ Renamer // PRO </h1>
 
 <p align="center">
   <b>Bulk-rename your manga &amp; comics in seconds.</b><br/>
@@ -22,7 +22,6 @@
 ```
 
 > **Portable.** No install — just run the `.exe`.  
-> **Secure.** API keys encrypted, stored in `%LOCALAPPDATA%`.  
 > **Smart.** Auto-detects volumes vs chapters, fetches subtitles, flags conflicts.
 
 ---
@@ -30,5 +29,5 @@
 ### Quick Start
 
 1. Run `CBZ Renamer.exe`
-2. Add API keys in ⚙ Settings *(Google Books is free, ComicVine requires a key)*
+2. Add API keys in ⚙ Settings *(Google Books is optional, ComicVine requires a key)*
 3. Open a folder → Scan → Review → Apply
