@@ -8,7 +8,9 @@ try:
     import re
     import threading
     import tkinter as tk
-    from tkinter import filedialog, messagebox, ttk
+    from tkinter import filedialog, messagebox, ttk, simpledialog
+    import webbrowser # Added by user
+    import json # Added by user
 
     from config import (
         BG_DARK, BG_PANEL, BG_SURFACE, FG_TEXT, FG_DIM, FG_MUTED,
@@ -17,7 +19,140 @@ try:
         load_config, save_config
     )
     from filename_parser import parse_filename, normalize
-    from api_sources import fetch_google_books_name, fetch_comicvine_name
+    from api_sources import (
+        fetch_google_books_name, fetch_comicvine_name,
+        load_disk_cache, save_disk_cache, reset_google_books_quota
+    )
+    from config import CACHE_PATH
+
+    class CollapsibleSection(tk.Frame):
+        """A frame with a clickable header that expands/collapses its content."""
+        def __init__(self, parent, title, expanded=True, **kwargs):
+            super().__init__(parent, bg=BG_PANEL, **kwargs)
+            self._expanded = expanded
+
+            # Header bar
+            self.header = tk.Frame(self, bg=BG_SURFACE, cursor="hand2")
+            self.header.pack(fill=tk.X)
+
+            self._arrow = tk.Label(self.header, text="▼" if expanded else "▶",
+                bg=BG_SURFACE, fg=FG_DIM, font=("Segoe UI", 9))
+            self._arrow.pack(side=tk.LEFT, padx=(12, 4), pady=8)
+
+            self._title_lbl = tk.Label(self.header, text=title, bg=BG_SURFACE,
+                fg=FG_DIM, font=("Segoe UI", 8, "bold"))
+            self._title_lbl.pack(side=tk.LEFT, pady=8)
+
+            # Content area
+            self.content = tk.Frame(self, bg=BG_PANEL, padx=16, pady=10)
+            if expanded:
+                self.content.pack(fill=tk.X)
+
+            # Bind click on all header widgets
+            for w in (self.header, self._arrow, self._title_lbl):
+                w.bind("<Button-1>", self._toggle)
+
+        def _toggle(self, event=None):
+            self._expanded = not self._expanded
+            if self._expanded:
+                self.content.pack(fill=tk.X)
+                self._arrow.config(text="▼")
+            else:
+                self.content.pack_forget()
+                self._arrow.config(text="▶")
+
+    class ToolTip:
+        """Create a tooltip for a given widget."""
+        def __init__(self, widget, text):
+            self.widget = widget
+            self.text = text
+            self.tip_window = None
+            widget.bind("<Enter>", self.enter)
+            widget.bind("<Leave>", self.leave)
+
+        def enter(self, event=None):
+            x, y, _, _ = self.widget.bbox("insert")
+            x += self.widget.winfo_rootx() + 25
+            y += self.widget.winfo_rooty() + 25
+            self.tip_window = tw = tk.Toplevel(self.widget)
+            tw.wm_overrideredirect(True)
+            tw.wm_geometry(f"+{x}+{y}")
+            
+            # Dark theme tooltip
+            label = tk.Label(tw, text=self.text, justify=tk.LEFT,
+                             bg="#2a2a2a", fg="#e0e0e0", relief="solid", borderwidth=1,
+                             font=("Segoe UI", 8), padx=4, pady=2)
+            label.pack()
+
+            if self.tip_window:
+                self.tip_window.destroy()
+                self.tip_window = None
+
+    class DarkConfirmDialog(tk.Toplevel):
+        """Custom dark-themed confirmation dialog."""
+        def __init__(self, parent, title, message):
+            super().__init__(parent)
+            self.title(title)
+            self.geometry("350x220")
+            self.resizable(False, False)
+            self.configure(bg=BG_DARK)
+            self.result = False
+            
+            # Modal setup
+            self.transient(parent)
+            self.grab_set()
+            
+            # Center on parent
+            try:
+                x = parent.winfo_rootx() + (parent.winfo_width() // 2) - 175
+                y = parent.winfo_rooty() + (parent.winfo_height() // 2) - 110
+                self.geometry(f"+{x}+{y}")
+            except:
+                pass
+                
+            # Content
+            # Icon (Blue Circle with ?)
+            icon_frame = tk.Frame(self, bg=BG_DARK)
+            icon_frame.pack(pady=(25, 10))
+            
+            canvas = tk.Canvas(icon_frame, width=50, height=50, bg=BG_DARK, highlightthickness=0)
+            canvas.pack()
+            # Draw blue circle
+            canvas.create_oval(2, 2, 48, 48, fill=ACCENT_BLUE, outline=ACCENT_BLUE)
+            # Draw ? text
+            canvas.create_text(25, 25, text="?", fill="white", font=("Segoe UI", 24, "bold"))
+            
+            # Message
+            tk.Label(self, text=message, bg=BG_DARK, fg=FG_TEXT, font=("Segoe UI", 11)).pack(pady=10)
+            
+            # Buttons
+            btn_frame = tk.Frame(self, bg=BG_DARK)
+            btn_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=20)
+            
+            def _yes():
+                self.result = True
+                self.destroy()
+            
+            def _no():
+                self.result = False
+                self.destroy()
+                
+            # Styled buttons
+            def _mkbtn(txt, cmd, highlight=False):
+                btn_bg = BG_PANEL
+                btn_fg = FG_TEXT
+                b = tk.Button(btn_frame, text=txt, command=cmd, 
+                              bg=btn_bg, fg=btn_fg, 
+                              activebackground="#2a2a2a",
+                              activeforeground="white",
+                              font=("Segoe UI", 10), relief="flat", padx=30, pady=6, cursor="hand2")
+                b.pack(side=tk.LEFT, expand=True, padx=10)
+                return b
+
+            _mkbtn("Yes", _yes, highlight=True)
+            _mkbtn("No", _no)
+
+            self.wait_window()
 
     class DarkRenamerApp:
         def __init__(self, root):
@@ -26,6 +161,26 @@ try:
             self.root.geometry("1100x680")
             self.root.minsize(900, 500)
             self.root.configure(bg=BG_DARK)
+
+            # --- Icon ---
+            try:
+                if getattr(sys, 'frozen', False):
+                    base_path = sys._MEIPASS
+                else:
+                    base_path = os.path.dirname(os.path.abspath(__file__))
+
+                # Use PNG with wm_iconphoto for sharp taskbar/header icon
+                png_path = os.path.join(base_path, "app_icon.png")
+                ico_path = os.path.join(base_path, "app_icon.ico")
+
+                if os.path.exists(png_path):
+                    icon_img = tk.PhotoImage(file=png_path)
+                    self.root.wm_iconphoto(True, icon_img)
+                    self._icon_ref = icon_img  # prevent garbage collection
+                elif os.path.exists(ico_path):
+                    self.root.iconbitmap(ico_path)
+            except Exception:
+                pass
 
             self.is_running = True
             self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
@@ -41,10 +196,13 @@ try:
             self.setting_sub_separator = tk.StringVar(value=cfg["sub_separator"])
             self.setting_online_source = tk.StringVar(value=cfg["online_source"])
             self.comicvine_api_key = tk.StringVar(value=cfg["comicvine_api_key"])
+            self.google_books_api_key = tk.StringVar(value=cfg.get("google_books_api_key", ""))
             self.setting_use_source_format = tk.BooleanVar(value=cfg["use_source_format"])
+            self.setting_cv_prefix = tk.StringVar(value=cfg.get("comicvine_vol_prefix", "#"))
 
             # --- STYLES ---
             style = ttk.Style()
+
             try:
                 if 'clam' in style.theme_names():
                     style.theme_use('clam')
@@ -70,31 +228,39 @@ try:
             style.map("Dark.Vertical.TScrollbar",
                 background=[('active', '#3a3a3a'), ('!active', '#252525')])
 
+            # ─── MAIN LAYOUT ───
+            container = tk.Frame(root, bg=BG_DARK)
+            container.pack(fill=tk.BOTH, expand=True)
+
+            self.content = tk.Frame(container, bg=BG_DARK)
+            self.content.pack(fill=tk.BOTH, expand=True)
+
             # --- HEADER ---
-            header = tk.Frame(root, bg=BG_PANEL, padx=24, pady=16)
+            header = tk.Frame(self.content, bg=BG_PANEL, padx=24, pady=16)
             header.pack(fill=tk.X)
+
+            # Settings Button (Far Left)
+            self.btn_gear = tk.Button(header, text="\u2630", command=self.open_settings_dialog,
+                bg=BG_PANEL, fg=FG_DIM, activebackground=BG_PANEL, activeforeground=FG_TEXT,
+                font=("Segoe UI", 14), relief="flat", borderwidth=0, cursor="hand2",
+                highlightthickness=0, padx=8)
+            self.btn_gear.pack(side=tk.LEFT, padx=(0, 16))
 
             title_frame = tk.Frame(header, bg=BG_PANEL)
             title_frame.pack(side=tk.LEFT)
             tk.Label(title_frame, text="CBZ RENAMER", bg=BG_PANEL, fg=FG_TEXT,
                      font=("Segoe UI", 15, "bold")).pack(side=tk.LEFT)
-            tk.Label(title_frame, text="  //  PRO", bg=BG_PANEL, fg=ACCENT_BLUE,
+            tk.Label(title_frame, text="  //  PRO", bg=BG_PANEL, fg=ACCENT_PURPLE,
                      font=("Segoe UI", 15, "bold")).pack(side=tk.LEFT)
-
-            self.btn_gear = tk.Button(header, text="\u2699", command=self.open_settings,
-                bg=BG_PANEL, fg=FG_DIM, activebackground=BG_PANEL, activeforeground=FG_TEXT,
-                font=("Segoe UI", 16), relief="flat", borderwidth=0, cursor="hand2",
-                highlightthickness=0, padx=8)
-            self.btn_gear.pack(side=tk.LEFT, padx=(16, 0))
 
             self.lbl_path = tk.Label(header, text="No folder selected", bg=BG_PANEL, fg=FG_DIM,
                                      font=("Consolas", 9), padx=12, pady=4)
             self.lbl_path.pack(side=tk.RIGHT)
 
-            tk.Frame(root, bg=ACCENT_BLUE, height=1).pack(fill=tk.X)
+            tk.Frame(self.content, bg=ACCENT_BLUE, height=1).pack(fill=tk.X)
 
             # --- CONTROLS ---
-            controls = tk.Frame(root, bg=BG_DARK, padx=24, pady=14)
+            controls = tk.Frame(self.content, bg=BG_DARK, padx=24, pady=14)
             controls.pack(fill=tk.X)
 
             self.btn_browse = self._make_btn(controls, "  OPEN FOLDER  ", self.select_folder, "#2a2a2a", FG_TEXT)
@@ -102,7 +268,7 @@ try:
 
             self.btn_scan = self._make_btn(controls, "  SCAN  ", self.start_scan_thread, "#333", FG_DIM)
             self.btn_scan.pack(side=tk.LEFT, padx=8)
-            self.btn_scan.config(state=tk.DISABLED)
+            self.btn_scan.config(state=tk.DISABLED, font=("Segoe UI", 11, "bold"), padx=24, pady=8)
 
             self.btn_apply = self._make_btn(controls, "  APPLY RENAME  ", self.apply_rename, "#333", FG_DIM)
             self.btn_apply.pack(side=tk.RIGHT)
@@ -113,7 +279,7 @@ try:
             self.hint_lbl.pack(side=tk.RIGHT, padx=(0, 16))
 
             # --- TABLE ---
-            table_outer = tk.Frame(root, bg=BORDER_COLOR, padx=1, pady=1)
+            table_outer = tk.Frame(self.content, bg=BORDER_COLOR, padx=1, pady=1)
             table_outer.pack(fill=tk.BOTH, expand=True, padx=24, pady=(0, 8))
 
             table_frame = tk.Frame(table_outer, bg=TABLE_BG)
@@ -151,7 +317,7 @@ try:
             self.tree.tag_configure("ready",     foreground=TABLE_FG)
 
             # --- STATUS BAR ---
-            status_bar = tk.Frame(root, bg=BG_PANEL, height=28)
+            status_bar = tk.Frame(self.content, bg=BG_PANEL, height=28)
             status_bar.pack(side=tk.BOTTOM, fill=tk.X)
             self.status_lbl = tk.Label(status_bar, text="Ready", bg=BG_PANEL, fg=FG_DIM,
                                        font=("Segoe UI", 8))
@@ -163,7 +329,7 @@ try:
             # Logic
             self.selected_directory = None
             self.rename_data = {}
-            self.series_cache = {}
+            self.series_cache = load_disk_cache(CACHE_PATH)
             self.scan_in_progress = False
 
         # ─── UI Helpers ──────────────────────────────────────────────
@@ -194,146 +360,248 @@ try:
                 "sub_separator": self.setting_sub_separator.get(),
                 "online_source": self.setting_online_source.get(),
                 "comicvine_api_key": self.comicvine_api_key.get(),
-                "use_source_format": self.setting_use_source_format.get()
+                "google_books_api_key": self.google_books_api_key.get(),
+                "use_source_format": self.setting_use_source_format.get(),
+                "comicvine_vol_prefix": self.setting_cv_prefix.get()
             })
 
         # ─── Settings Dialog ─────────────────────────────────────────
 
-        def open_settings(self):
+        def open_settings_dialog(self):
+            """Open a modal settings dialog with collapsible sections."""
             dlg = tk.Toplevel(self.root)
             dlg.title("Settings")
             dlg.configure(bg=BG_DARK)
-            dlg.geometry("460x620")
-            dlg.resizable(False, False)
+            dlg.geometry("420x580")
+            dlg.resizable(True, True)
+            dlg.minsize(360, 400)
             dlg.transient(self.root)
             dlg.grab_set()
 
+            # Set dialog icon to match main window
+            try:
+                if getattr(sys, 'frozen', False):
+                    base_path = sys._MEIPASS
+                else:
+                    base_path = os.path.dirname(os.path.abspath(__file__))
+                icon_path = os.path.join(base_path, "app_icon.ico")
+                if os.path.exists(icon_path):
+                    dlg.iconbitmap(icon_path)
+            except Exception:
+                pass
+
+            # Center on main window
             dlg.update_idletasks()
-            x = self.root.winfo_x() + (self.root.winfo_width() // 2) - 230
-            y = self.root.winfo_y() + (self.root.winfo_height() // 2) - 310
+            x = self.root.winfo_x() + (self.root.winfo_width() // 2) - 210
+            y = self.root.winfo_y() + (self.root.winfo_height() // 2) - 290
             dlg.geometry(f"+{x}+{y}")
 
             # Header
             hdr = tk.Frame(dlg, bg=BG_PANEL, padx=24, pady=14)
             hdr.pack(fill=tk.X)
-            tk.Label(hdr, text="\u2699  Settings", bg=BG_PANEL, fg=FG_TEXT,
+            tk.Label(hdr, text="\u2630  Settings", bg=BG_PANEL, fg=FG_TEXT,
                      font=("Segoe UI", 13, "bold")).pack(side=tk.LEFT)
             tk.Frame(dlg, bg=BORDER_COLOR, height=1).pack(fill=tk.X)
 
             # Scrollable body
-            canvas = tk.Canvas(dlg, bg=BG_DARK, highlightthickness=0, borderwidth=0)
+            canvas = tk.Canvas(dlg, bg=BG_PANEL, highlightthickness=0, borderwidth=0)
+            scrollbar = ttk.Scrollbar(dlg, orient="vertical", command=canvas.yview,
+                                       style="Dark.Vertical.TScrollbar")
+            canvas.configure(yscrollcommand=scrollbar.set)
+            scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
             canvas.pack(fill=tk.BOTH, expand=True)
 
-            body = tk.Frame(canvas, bg=BG_DARK, padx=28, pady=20)
-            canvas.create_window((0, 0), window=body, anchor="nw")
+            body = tk.Frame(canvas, bg=BG_PANEL, padx=8, pady=12)
+            body_window = canvas.create_window((0, 0), window=body, anchor="nw")
 
             def _on_body_configure(event):
                 canvas.configure(scrollregion=canvas.bbox("all"))
-                canvas.itemconfig(canvas.find_all()[0], width=event.width)
+            def _on_canvas_configure(event):
+                canvas.itemconfig(body_window, width=event.width)
             body.bind("<Configure>", _on_body_configure)
-            canvas.bind("<Configure>", lambda e: canvas.itemconfig(canvas.find_all()[0], width=e.width))
+            canvas.bind("<Configure>", _on_canvas_configure)
+
+            # Mouse wheel scrolling
+            def _on_mousewheel(event):
+                canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+            canvas.bind_all("<MouseWheel>", _on_mousewheel)
+            dlg.protocol("WM_DELETE_WINDOW", lambda: self._close_settings_dialog(dlg, canvas))
 
             # ── SCAN SOURCE ──
-            self._settings_section(body, "SCAN SOURCE")
-            mode_frame = tk.Frame(body, bg=BG_DARK)
-            mode_frame.pack(fill=tk.X, pady=(4, 16))
+            sec_scan = CollapsibleSection(body, "SCAN SOURCE", expanded=False)
+            sec_scan.pack(fill=tk.X, pady=(0, 4))
             for val, label in [("both", "Local + Online"), ("local", "Local Only"), ("online", "Online Only")]:
-                self._dark_radio(mode_frame, label, self.setting_scan_mode, val)
+                self._dark_radio(sec_scan.content, label, self.setting_scan_mode, val)
 
             # ── ONLINE SOURCE ──
-            self._settings_section(body, "ONLINE SOURCE")
-            src_frame = tk.Frame(body, bg=BG_DARK)
-            src_frame.pack(fill=tk.X, pady=(4, 4))
-            for val, label in [("google_books", "Google Books  (no key needed)"), ("comicvine", "ComicVine  (requires API key)")]:
+            sec_online = CollapsibleSection(body, "ONLINE SOURCE", expanded=False)
+            sec_online.pack(fill=tk.X, pady=(0, 4))
+            src_frame = tk.Frame(sec_online.content, bg=BG_PANEL)
+            src_frame.pack(fill=tk.X, pady=(0, 4))
+            for val, label in [("google_books", "Google Books"), ("comicvine", "ComicVine")]:
                 self._dark_radio(src_frame, label, self.setting_online_source, val)
 
-            # API key section
-            key_frame = tk.Frame(body, bg=BG_DARK, padx=22)
-            key_frame.pack(fill=tk.X, pady=(4, 16))
+            # ── API KEYS ──
+            sec_keys = CollapsibleSection(sec_online.content, "API Keys", expanded=False)
+            sec_keys.pack(fill=tk.X, pady=(4, 0))
+            
+            # Helper to make key row
+            def _make_key_row(parent, label_text, var, pre_link_text, link_text, link_url, tooltip_text=None):
+                f = tk.Frame(parent, bg=BG_PANEL)
+                f.pack(fill=tk.X, pady=(2, 6))
+                
+                tk.Label(f, text=label_text, bg=BG_PANEL, fg=FG_DIM, font=("Segoe UI", 8)).pack(anchor="w")
+                
+                row = tk.Frame(f, bg=BG_PANEL)
+                row.pack(fill=tk.X, pady=(2, 0))
+                
+                entry = tk.Entry(row, textvariable=var, show="\u2022",
+                    font=("Consolas", 9), bg=BG_SURFACE, fg=FG_TEXT, insertbackground=FG_TEXT,
+                    selectbackground=ACCENT_BLUE, relief="flat", borderwidth=0, highlightthickness=1,
+                    highlightcolor=ACCENT_BLUE, highlightbackground=BORDER_COLOR)
+                entry.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=4, padx=(0, 6))
+                
+                def _toggle():
+                    if entry.cget('show') == '':
+                        entry.config(show='\u2022')
+                        btn.config(text='Show')
+                    else:
+                        entry.config(show='')
+                        btn.config(text='Hide')
 
-            tk.Label(key_frame, text="ComicVine API Key:", bg=BG_DARK, fg=FG_DIM,
-                     font=("Segoe UI", 8)).pack(anchor="w")
+                btn = tk.Button(row, text="Show", command=_toggle,
+                    bg="#2a2a2a", fg=FG_DIM, activebackground="#3a3a3a", activeforeground=FG_TEXT,
+                    font=("Segoe UI", 8), relief="flat", borderwidth=0, cursor="hand2",
+                    highlightthickness=0, padx=8, pady=2)
+                btn.pack(side=tk.RIGHT)
+                
+                # Instruction / Link line
+                if pre_link_text or link_text:
+                    link_frame = tk.Frame(f, bg=BG_PANEL)
+                    link_frame.pack(anchor="w", pady=(2, 0))
+                    
+                    if pre_link_text:
+                         tk.Label(link_frame, text=pre_link_text, bg=BG_PANEL, fg="#666666", font=("Segoe UI", 7)).pack(side=tk.LEFT)
+                    
+                    if link_text and link_url:
+                         l = tk.Label(link_frame, text=link_text, bg=BG_PANEL, fg="#5ba4e5", font=("Segoe UI", 7), cursor="hand2")
+                         l.pack(side=tk.LEFT)
+                         l.bind("<Button-1>", lambda e: webbrowser.open(link_url))
+                         
+                         def _enter(e): l.config(fg="#8bc4ff")
+                         def _leave(e): l.config(fg="#5ba4e5")
+                         l.bind("<Enter>", _enter)
+                         l.bind("<Leave>", _leave)
+                         
+                         if tooltip_text:
+                             # Custom tooltip integration
+                             tt = ToolTip(l, tooltip_text) 
+                             # Use add="+" to avoid overwriting hover color bindings
+                             l.bind("<Enter>", _enter, add="+")
+                             l.bind("<Leave>", _leave, add="+")
 
-            entry_row = tk.Frame(key_frame, bg=BG_DARK)
-            entry_row.pack(fill=tk.X, pady=(4, 2))
-
-            self._key_visible = False
-            self._key_entry = tk.Entry(entry_row, textvariable=self.comicvine_api_key, show="\u2022",
-                font=("Consolas", 9), bg=BG_SURFACE, fg=FG_TEXT, insertbackground=FG_TEXT,
-                selectbackground=ACCENT_BLUE, relief="flat", borderwidth=0, highlightthickness=1,
-                highlightcolor=ACCENT_BLUE, highlightbackground=BORDER_COLOR)
-            self._key_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=4, padx=(0, 6))
-
-            self._btn_show_key = tk.Button(entry_row, text="Show", command=self._toggle_key_visibility,
-                bg="#2a2a2a", fg=FG_DIM, activebackground="#3a3a3a", activeforeground=FG_TEXT,
-                font=("Segoe UI", 8), relief="flat", borderwidth=0, cursor="hand2",
-                highlightthickness=0, padx=8, pady=2)
-            self._btn_show_key.pack(side=tk.RIGHT)
-
-            tk.Label(key_frame, text="Get a free key at comicvine.gamespot.com/api",
-                     bg=BG_DARK, fg="#444444", font=("Segoe UI", 7)).pack(anchor="w", pady=(2, 0))
+            _make_key_row(sec_keys.content, "Google Books API Key (Optional):", self.google_books_api_key, 
+                          "Get a key at ", "console.cloud.google.com", "https://console.cloud.google.com",
+                          "Significantly increases daily quota to 1000/day")
+            
+            _make_key_row(sec_keys.content, "ComicVine API Key (Required):", self.comicvine_api_key,
+                          "Get a free key at ", "comicvine.gamespot.com/api", "https://comicvine.gamespot.com/api",
+                          None)
 
             # ── NUMBER PADDING ──
-            self._settings_section(body, "NUMBER PADDING")
-            pad_frame = tk.Frame(body, bg=BG_DARK)
-            pad_frame.pack(fill=tk.X, pady=(4, 16))
+            sec_padding = CollapsibleSection(body, "NUMBER PADDING", expanded=False)
+            sec_padding.pack(fill=tk.X, pady=(0, 4))
             for val, label in [(2, "2 digits  (01, 02, 10)"), (3, "3 digits  (001, 002, 010)")]:
-                self._dark_radio(pad_frame, label, self.setting_num_padding, val)
+                self._dark_radio(sec_padding.content, label, self.setting_num_padding, val)
 
             # ── WEB MATCH ──
-            self._settings_section(body, "WEB MATCH")
+            sec_web = CollapsibleSection(body, "WEB MATCH", expanded=False)
+            sec_web.pack(fill=tk.X, pady=(0, 4))
+            wb = sec_web.content
+
+            # "Include subtitle" check
+            cb_sub = tk.Checkbutton(wb, text="Include subtitle from API (e.g. 'Vol 1' → 'Vol 1: Subtitle')",
+                          variable=self.setting_include_subtitle,
+                          bg=BG_PANEL, fg=FG_DIM, selectcolor=BG_PANEL, activebackground=BG_PANEL, activeforeground=FG_TEXT)
+            cb_sub.pack(anchor="w", pady=(2, 0))
+            ToolTip(cb_sub, "Warning: Increases API calls significantly.\nChecks every file individually instead of once per series.")
 
             # Source format toggle
-            sf_cb = tk.Checkbutton(body, text="Use exact formatting from source",
+            sf_cb = tk.Checkbutton(wb, text="Use exact formatting from source",
                 variable=self.setting_use_source_format,
-                bg=BG_DARK, fg=TABLE_FG, selectcolor=BG_SURFACE, activebackground=BG_DARK,
+                bg=BG_PANEL, fg=TABLE_FG, selectcolor=BG_PANEL, activebackground=BG_PANEL,
                 activeforeground=FG_TEXT, font=("Segoe UI", 9), highlightthickness=0, borderwidth=0)
             sf_cb.pack(anchor="w", pady=(4, 2))
 
-            # Dynamic example label for source format
-            self._sf_example = tk.Label(body, text="", bg=BG_DARK, fg=FG_DIM, font=("Consolas", 8))
-            self._sf_example.pack(anchor="w", padx=(22, 0), pady=(0, 8))
+            # ComicVine Prefix Dropdown
+            cv_frame = tk.Frame(wb, bg=BG_PANEL)
+            cv_frame.pack(fill=tk.X, anchor="w", padx=(24, 0), pady=(0, 6))
+            tk.Label(cv_frame, text="ComicVine Prefix:", bg=BG_PANEL, fg=FG_DIM,
+                     font=("Segoe UI", 8)).pack(side=tk.LEFT)
+            cv_combo = ttk.Combobox(cv_frame, textvariable=self.setting_cv_prefix,
+                                    values=["#", "Vol.", "Volume", "v."],
+                                    state="readonly", width=10)
+            cv_combo.pack(side=tk.LEFT, padx=(8, 0))
+
+            # Dynamic example label
+            sf_example = tk.Label(wb, text="", bg=BG_PANEL, fg=TABLE_FG,
+                                   font=("Consolas", 9, "italic"))
+            sf_example.pack(anchor="w", padx=(24, 0), pady=(0, 8))
 
             def _update_sf_example(*_args):
                 if self.setting_use_source_format.get():
-                    self._sf_example.config(text="e.g. Berserk Volume 01.cbz  (as returned by API)")
+                    p = self.setting_cv_prefix.get()
+                    sep = " " if p != "#" else ""
+                    sf_example.config(text=f"e.g. Berserk {p}{sep}01.cbz  (from API)")
                 else:
-                    self._sf_example.config(text="e.g. Berserk, Vol. 01.cbz  (standardized)")
+                    sf_example.config(text="e.g. Berserk, Vol. 01.cbz  (standardized)")
             self.setting_use_source_format.trace_add("write", _update_sf_example)
+            self.setting_cv_prefix.trace_add("write", _update_sf_example)
             _update_sf_example()
 
             # Subtitle options
-            cb = tk.Checkbutton(body, text="Include subtitle from API", variable=self.setting_include_subtitle,
-                bg=BG_DARK, fg=TABLE_FG, selectcolor=BG_SURFACE, activebackground=BG_DARK,
+            cb = tk.Checkbutton(wb, text="Include subtitle from API",
+                variable=self.setting_include_subtitle,
+                bg=BG_PANEL, fg=TABLE_FG, selectcolor=BG_PANEL, activebackground=BG_PANEL,
                 activeforeground=FG_TEXT, font=("Segoe UI", 9), highlightthickness=0, borderwidth=0)
             cb.pack(anchor="w", pady=(4, 8))
 
-            sep_frame = tk.Frame(body, bg=BG_DARK, padx=22)
+            sep_frame = tk.Frame(wb, bg=BG_PANEL, padx=6)
             sep_frame.pack(fill=tk.X, pady=(0, 4))
-
-            tk.Label(sep_frame, text="Separator:", bg=BG_DARK, fg=FG_DIM,
+            tk.Label(sep_frame, text="Separator:", bg=BG_PANEL, fg=FG_DIM,
                      font=("Segoe UI", 8)).pack(side=tk.LEFT, padx=(0, 8))
             for val, label in [("hyphen", " -  Hyphen"), ("colon", " :  Colon"), ("source", " Match source")]:
                 rb = tk.Radiobutton(sep_frame, text=label, variable=self.setting_sub_separator, value=val,
-                    bg=BG_DARK, fg=TABLE_FG, selectcolor=BG_SURFACE, activebackground=BG_DARK,
+                    bg=BG_PANEL, fg=TABLE_FG, selectcolor=BG_PANEL, activebackground=BG_PANEL,
                     activeforeground=FG_TEXT, font=("Segoe UI", 8), highlightthickness=0,
                     borderwidth=0, indicatoron=True)
                 rb.pack(side=tk.LEFT, padx=(0, 6))
 
-            tk.Label(body, text="e.g. Berserk, Vol. 03 - Dark Swordsman.cbz",
-                     bg=BG_DARK, fg=FG_DIM, font=("Consolas", 8)).pack(anchor="w", padx=(22, 0), pady=(2, 0))
+            sep_example = tk.Label(wb, text="", bg=BG_PANEL, fg=FG_DIM, font=("Consolas", 8))
+            sep_example.pack(anchor="w", padx=(6, 0), pady=(2, 0))
 
-            # ── DONE ──
-            btn_frame = tk.Frame(dlg, bg=BG_DARK, pady=14)
-            btn_frame.pack(fill=tk.X)
-            tk.Button(btn_frame, text="  DONE  ", command=lambda: self._close_settings(dlg),
-                bg=ACCENT_BLUE, fg="white", activebackground=ACCENT_HOVER, activeforeground="white",
-                font=("Segoe UI", 9, "bold"), relief="flat", padx=24, pady=7,
-                borderwidth=0, cursor="hand2", highlightthickness=0).pack()
+            def _update_sep(*args):
+                s = self.setting_sub_separator.get()
+                sep = " - "
+                if s == "colon":
+                    sep = ": "
+                elif s == "source":
+                    sep = " - " # standard fallback for example
+                
+                sep_example.config(text=f"e.g. The Walking Dead, Vol. 01{sep}Days Gone Bye.cbz")
+            
+            self.setting_sub_separator.trace_add("write", _update_sep)
+            _update_sep()
+
+        def _close_settings_dialog(self, dlg, canvas):
+            """Clean up and close the settings dialog."""
+            canvas.unbind_all("<MouseWheel>")
+            self._save_settings()
+            dlg.destroy()
 
         def _dark_radio(self, parent, label, var, val):
             rb = tk.Radiobutton(parent, text=label, variable=var, value=val,
-                bg=BG_DARK, fg=TABLE_FG, selectcolor=BG_SURFACE, activebackground=BG_DARK,
+                bg=BG_PANEL, fg=TABLE_FG, selectcolor=BG_PANEL, activebackground=BG_PANEL,
                 activeforeground=FG_TEXT, font=("Segoe UI", 9), highlightthickness=0,
                 borderwidth=0, indicatoron=True)
             rb.pack(anchor="w", pady=1)
@@ -346,15 +614,6 @@ try:
             else:
                 self._key_entry.config(show="\u2022")
                 self._btn_show_key.config(text="Show")
-
-        def _settings_section(self, parent, label):
-            tk.Label(parent, text=label, bg=BG_DARK, fg=FG_DIM,
-                     font=("Segoe UI", 8, "bold")).pack(anchor="w")
-
-        def _close_settings(self, dlg):
-            self.series_cache.clear()
-            self._save_settings()
-            dlg.destroy()
 
         # ─── Folder / Scan ───────────────────────────────────────────
 
@@ -373,6 +632,23 @@ try:
         def start_scan_thread(self):
             if self.scan_in_progress:
                 return
+
+            # Reset API quotas (Give fresh chance if key added)
+            reset_google_books_quota()
+
+            # Check for ComicVine key if needed (Main Thread)
+            if self.setting_online_source.get() == "comicvine":
+                cv_key = self.comicvine_api_key.get().strip()
+                if not cv_key:
+                    new_key = simpledialog.askstring("ComicVine API Key Required", 
+                                        "Please enter your ComicVine API Key:\n(Get one at comicvine.gamespot.com/api)",
+                                        parent=self.root)
+                    if new_key and new_key.strip():
+                        self.comicvine_api_key.set(new_key.strip())
+                    else:
+                        print("ComicVine key required. Aborting scan.")
+                        return
+
             self.scan_in_progress = True
             self._disable_btn(self.btn_scan)
             self._disable_btn(self.btn_apply)
@@ -440,6 +716,8 @@ try:
                 pad = self.setting_num_padding.get()
                 source = self.setting_online_source.get()
                 use_source_fmt = self.setting_use_source_format.get()
+                series_probe_results = {}  # Track if series has subtitles (True/False)
+                cv_key_declined = False    # Track if user declined to provide key this session
 
                 for i, filename in enumerate(files):
                     if not self.is_running:
@@ -463,16 +741,85 @@ try:
                     if scan_mode in ("both", "online"):
                         try:
                             if source == "comicvine":
-                                def _cv_status(text, color):
-                                    self.root.after(0, lambda: self.status_lbl.config(text=text, fg=color))
-                                online_series, online_raw_title, online_subtitle, online_orig_sep = \
-                                    fetch_comicvine_name(series_guess, self.series_cache,
-                                                        self.comicvine_api_key.get().strip(),
-                                                        vol_num=vol_num_raw,
-                                                        status_callback=_cv_status)
+                                cv_key = self.comicvine_api_key.get().strip()
+                                if cv_key:
+                                    def _cv_status(text, color):
+                                        if self.root:
+                                            self.root.after(0, lambda: self.status_lbl.config(text=text, fg=color))
+                                    
+                                    # Add space for non-# prefixes
+                                    cv_prefix = self.setting_cv_prefix.get().strip()
+                                    if cv_prefix != "#":
+                                        cv_prefix += " "
+
+                                    text = f"Searching ComicVine for: {series_guess}"
+                                    color = FG_TEXT
+                                    if self.root:
+                                        self.root.after(0, lambda: self.status_lbl.config(text=text, fg=color))
+                                    online_series, online_raw_title, online_subtitle, online_orig_sep = \
+                                        fetch_comicvine_name(series_guess, self.series_cache,
+                                                            cv_key,
+                                                            vol_num=vol_num_raw,
+                                                            vol_prefix=cv_prefix,
+                                                            status_callback=_cv_status)
+                                else:
+                                    def _gb_status(text, color):
+                                        if self.root:
+                                            self.root.after(0, lambda: self.status_lbl.config(text=text, fg=color))
+
+                                    # Smart Probe Logic
+                                    query_vol = None
+                                    if self.setting_include_subtitle.get():
+                                        if series_guess not in series_probe_results:
+                                            query_vol = vol_num_raw  # Probe first file
+                                        elif series_probe_results[series_guess]:
+                                            query_vol = vol_num_raw  # Continue strict mode
+                                        else:
+                                            query_vol = None         # Fallback to fast mode
+
+                                    online_series, online_raw_title, online_subtitle, online_orig_sep = \
+                                        fetch_google_books_name(series_guess, self.series_cache,
+                                                                api_key=self.google_books_api_key.get().strip() or None,
+                                                                status_callback=_gb_status,
+                                                                vol_num=query_vol)
+                                    
+                                    # Update probe results
+                                    if self.setting_include_subtitle.get():
+                                        if online_subtitle:
+                                            series_probe_results[series_guess] = True
+                                        elif series_guess not in series_probe_results:
+                                            # First probe found NO subtitle. This result is likely generic enough for the series.
+                                            # Cache it under the generic series key to save a call for next files (which will use fast mode).
+                                            series_probe_results[series_guess] = False
+                                            if online_series:
+                                                self.series_cache[series_guess] = (online_series, online_raw_title, online_subtitle, online_orig_sep)
                             else:
+                                def _gb_status(text, color):
+                                    if self.root:
+                                        self.root.after(0, lambda: self.status_lbl.config(text=text, fg=color))
+
+                                # Smart Probe Logic
+                                query_vol = None
+                                if self.setting_include_subtitle.get():
+                                    if series_guess not in series_probe_results:
+                                        query_vol = vol_num_raw  # Probe first file
+                                    elif series_probe_results[series_guess]:
+                                        query_vol = vol_num_raw  # Continue strict mode
+                                    else:
+                                        query_vol = None         # Fallback to fast mode
+
                                 online_series, online_raw_title, online_subtitle, online_orig_sep = \
-                                    fetch_google_books_name(series_guess, self.series_cache)
+                                    fetch_google_books_name(series_guess, self.series_cache,
+                                                            api_key=self.google_books_api_key.get().strip() or None,
+                                                            status_callback=_gb_status,
+                                                            vol_num=query_vol)
+
+                                # Update probe results
+                                if self.setting_include_subtitle.get():
+                                    if online_subtitle:
+                                        series_probe_results[series_guess] = True
+                                    elif series_guess not in series_probe_results:
+                                        series_probe_results[series_guess] = False
                         except Exception as e:
                             print(f"Online lookup failed for '{series_guess}': {e}")
 
@@ -559,6 +906,7 @@ try:
                     self.root.after(0, lambda: setattr(self, 'scan_in_progress', False))
 
         def finish_scan(self, total):
+            save_disk_cache(self.series_cache, CACHE_PATH)
             self.scan_in_progress = False
             self.check_duplicates()
             self._enable_btn(self.btn_apply, SUCCESS_GREEN)
@@ -699,7 +1047,7 @@ try:
                 self.status_lbl.config(text="Nothing to rename", fg=FG_DIM)
                 return
 
-            if not messagebox.askyesno("Confirm", f"Rename {len(final_names)} file(s)?"):
+            if not DarkConfirmDialog(self.root, "Confirm", f"Rename {len(final_names)} file(s)?").result:
                 return
 
             renamed, skipped, errors = [], [], []
@@ -821,6 +1169,21 @@ try:
                 borderwidth=0, cursor="hand2", highlightthickness=0).pack()
 
     if __name__ == "__main__":
+        # Per-Monitor DPI Awareness v2 for sharp rendering on high-DPI displays
+        try:
+            ctypes.windll.shcore.SetProcessDpiAwareness(2)
+        except Exception:
+            try:
+                ctypes.windll.user32.SetProcessDPIAware()
+            except Exception:
+                pass
+
+        # Set AppUserModelID so Windows taskbar shows our icon, not Python's
+        try:
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('CBZRenamer.Pro.1.0')
+        except Exception:
+            pass
+
         root = tk.Tk()
         app = DarkRenamerApp(root)
         root.mainloop()

@@ -1,60 +1,32 @@
 # CBZ Renamer // PRO
 
-A desktop tool for batch-renaming `.cbz` comic and manga files using online metadata from **Google Books** and **ComicVine** APIs.
+A professional bulk renaming tool for comic and manga files (`.cbz`) that fetches accurate metadata from **Google Books** and **ComicVine**. This tool helps organize your digital library by normalizing filenames and appending correct subtitles.
 
-![Python](https://img.shields.io/badge/Python-3.10+-blue?logo=python&logoColor=white)
-![Tkinter](https://img.shields.io/badge/GUI-Tkinter-green)
-![License](https://img.shields.io/badge/License-MIT-yellow)
-
----
+![License](https://img.shields.io/badge/License-MIT-purple) ![Python](https://img.shields.io/badge/Python-3.13-blue)
 
 ## Features
 
-- **Online Lookups** — Fetches correct series names and subtitles from Google Books or ComicVine
-- **Source Format Preservation** — Uses the exact title formatting returned by the API (e.g. `Berserk Volume 01.cbz`), with a toggle to switch to standardized formatting (`Berserk, Vol. 01.cbz`)
-- **Local Guess** — Parses filenames locally when no mathch is found
-- **Conflict Detection** — Highlights when online and local names disagree
-- **Duplicate Detection** — Flags files that would rename to the same target
-- **Inline Editing** — Double-click any final name to manually adjust it
-- **Right-Click Toggle** — Quickly switch between Web Match and Local Guess per file
-- **Zero-Padded Numbers** — Configurable 2 or 3-digit volume padding
-- **Subtitle Support** — Optionally include subtitles with configurable separators
-- **Dark UI** — Clean dark theme built with Tkinter
+- **Smart Metadata** — Verifies series names and numbering against online databases.
+- **Subtitle Probing** — Automatically fetches volume subtitles (e.g., `Invincible, Vol. 01: Family Matters`).
+- **Secure Configuration** — API keys are encrypted and stored in a separate `.secrets` file.
+- **Conflict Detection** — Highlights discrepancies between filenames and online data.
+- **Pro UI** — sleek dark theme, inline editing, and collapsible settings.
 
-## Getting Started
+## Usage
 
-### Requirements
+1.  **Run** the application (`CBZ Renamer.exe` or `python cbz_file_renamer.py`).
+2.  **Configure** your API keys in Settings (`Google Books` is free; `ComicVine` requires a key).
+3.  **Open Folder** containing your `.cbz` files.
+4.  **Scan** to fetch metadata.
+5.  **Review** matches (Web vs Local). Double-click to edit, right-click to toggle source.
+6.  **Apply Rename** to finalize changes.
 
-- Python 3.10+
-- No external dependencies — uses only the Python standard library
+## Installation
 
-### Run
-
+No installation required for the executable.
+To run from source:
 ```bash
+pip install -r requirements.txt  # (Only standard lib + Pillow/requests if needed)
 python cbz_file_renamer.py
 ```
-
-### Usage
-
-1. Click **OPEN FOLDER** and select a directory containing `.cbz` files
-2. Click **SCAN** to analyze filenames and fetch online metadata
-3. Review the results table:
-   - **WEB MATCH** — Name from the online API
-   - **LOCAL GUESS** — Name parsed from the filename
-   - **FINAL NAME** — The name that will be applied (double-click to edit)
-   - **STATUS** — `Verified`, `Conflict`, `Online`, `Ready`, `Perfect`, etc.
-4. Right-click a row to toggle between Web Match and Local Guess
-5. Click **APPLY RENAME** to rename the files
-
-### Settings
-
-Click the ⚙ gear icon to configure:
-
-| Setting               | Options                                                        |
-| --------------------- | -------------------------------------------------------------- |
-| **Scan Source**       | Local + Online, Local Only, Online Only                        |
-| **Online Source**     | Google Books (no key needed), ComicVine (requires API key)     |
-| **Number Padding**    | 2 digits (01) or 3 digits (001)                                |
-| **Use Source Format** | Preserve exact API title formatting (default: on)              |
-| **Subtitles**         | Include/exclude, separator style (hyphen, colon, match source) |
-
+*(Note: This project uses only the Python Standard Library + Pillow/requests for icons/api)*

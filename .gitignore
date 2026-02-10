@@ -12,3 +12,11 @@ crash_log.txt
 # IDE
 .vscode/
 .idea/
+
+# Build artifacts
+dist/
+build/
+*.exe
+
+# Secrets
+cbz_renamer.secrets
